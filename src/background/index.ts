@@ -1,8 +1,8 @@
 import { isEqual } from 'lodash-es';
 import { ApiClient, SessionName } from 'synology-typescript-api';
 import { getHostUrl, onStoredStateChange, NotificationSettings, DEFAULT_SETTINGS } from '../state';
+import { addDownloadTasksAndPoll, pollTasks, clearCachedTasks } from '../api-actions';
 import { setSharedObjects, notify } from '../browserApi';
-import { addDownloadTasksAndPoll, pollTasks, clearCachedTasks } from '../apiActions';
 import { shimExtensionApi } from '../apiShim';
 
 shimExtensionApi();

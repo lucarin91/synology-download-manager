@@ -1,4 +1,4 @@
-import { uniqueId, find } from 'lodash-es';
+import { find } from 'lodash-es';
 import Axios from 'axios';
 import {
   ApiClient,
@@ -9,100 +9,10 @@ import {
   FormFile,
   isFormFile
 } from 'synology-typescript-api';
-import { errorMessageFromCode, errorMessageFromConnectionFailure } from './apiErrors';
-import { CachedTasks } from './state';
-import { notify } from './browserApi';
-
-const NO_PERMISSIONS_ERROR_CODE = 105;
-
-// This state seems to happen when you don't touch the browser for a couple days: I guess the session token
-// is invalidated in some fashion but the server doesn't respond with that error code, but instead this one.
-function wrapInNoPermissionsRetry<T extends (api: ApiClient, ...args: any[]) => Promise<ConnectionFailure | SynologyResponse<any>>>(fn: T): T {
-  return function(api: ApiClient, ...args: any[]) {
-    return fn(api, ...args)
-      .then(result => {
-        if (!isConnectionFailure(result) && !result.success && result.error.code === NO_PERMISSIONS_ERROR_CODE) {
-          console.log(`request got permission failure, will retry once; args:`, args, 'result:', result);
-          api.Auth.Logout();
-          return fn(api, ...args);
-        } else {
-          return result;
-        }
-      });
-  } as T;
-}
-
-export function clearCachedTasks() {
-  const emptyState: CachedTasks = {
-    tasks: [],
-    taskFetchFailureReason: null,
-    tasksLastCompletedFetchTimestamp: null,
-    tasksLastInitiatedFetchTimestamp: null
-  };
-
-  return browser.storage.local.set(emptyState);
-}
-
-const doTaskPoll = wrapInNoPermissionsRetry((api: ApiClient) => {
-  return api.DownloadStation.Task.List({
-    offset: 0,
-    limit: -1,
-    additional: [ 'transfer' ],
-    timeout: 20000
-  });
-});
-
-export function pollTasks(api: ApiClient): Promise<void> {
-  const cachedTasksInit: Partial<CachedTasks> = {
-    tasksLastInitiatedFetchTimestamp: Date.now()
-  };
-
-  const pollId = uniqueId('poll-');
-  console.log(`(${pollId}) polling for tasks...`);
-
-  return Promise.all([
-    browser.storage.local.set(cachedTasksInit),
-    doTaskPoll(api)
-  ])
-    .then(([ _, response ]) => {
-      console.log(`(${pollId}) poll completed with response`, response);
-
-      function setCachedTasksResponse(cachedTasks: Partial<CachedTasks>) {
-        return browser.storage.local.set({
-          tasksLastCompletedFetchTimestamp: Date.now(),
-          ...cachedTasks
-        });
-      }
-
-      if (isConnectionFailure(response)) {
-        if (response.type === 'missing-config') {
-          return setCachedTasksResponse({
-            taskFetchFailureReason: 'missing-config'
-          });
-        } else {
-          return setCachedTasksResponse({
-            taskFetchFailureReason: {
-              failureMessage: errorMessageFromConnectionFailure(response)
-            }
-          });
-        }
-      } else if (response.success) {
-        return setCachedTasksResponse({
-          tasks: response.data.tasks,
-          taskFetchFailureReason: null
-        });
-      } else {
-        return setCachedTasksResponse({
-          taskFetchFailureReason: {
-            failureMessage: errorMessageFromCode(response.error.code, 'DownloadStation.Task')
-          }
-        });
-      }
-    })
-    .catch(error => {
-      console.error('unexpected error while trying to poll for new tasks; will not attempt to set anything in browser state', error);
-    });
-}
+import { errorMessageFromCode } from '../apiErrors';
+import { notify } from '../browserApi';
+import { wrapInNoPermissionsRetry } from './shared';
+import { pollTasks } from './pollTasks';
 
 const AUTO_DOWNLOAD_TORRENT_FILE_PROTOCOLS = [
   'http',
@@ -285,6 +195,10 @@ export function addDownloadTasksAndPoll(api: ApiClient, urls: string[], path?: s
             return accumulator;
           }, { file: [] as FormFile[], uri: [] as string[] });
 
+          // TODO: One request for all URIs, one request for each file (or maybe just one request for each thing)?
+          // The docs say that it DownloadStation can only accept one file at a time.
+          // TODO: Should maybe change Create in synology-typescript-api to use POST always so that many very long
+          // URIs won't get mangled by GET length limitations.
           // TODO: Test the following:
           // - mixing file and uri
           // - providing one non-empty and one empty

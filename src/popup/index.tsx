@@ -12,8 +12,8 @@ const classNames: typeof classNamesProxy = (classNamesProxy as any).default || c
 
 import { AdvancedAddTasksForm } from '../common/AdvancedAddTasksForm';
 import { VisibleTaskSettings, onStoredStateChange, getHostUrl } from '../state';
+import { addDownloadTasksAndPoll, pollTasks } from '../api-actions';
 import { getSharedObjects } from '../browserApi';
-import { addDownloadTasksAndPoll, pollTasks } from '../apiActions';
 import { CallbackResponse } from './popupTypes';
 import { matchesFilter } from './filtering';
 import { Task } from './Task';
