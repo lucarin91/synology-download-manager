@@ -1,6 +1,14 @@
 import { uniqueId, find } from 'lodash-es';
 import Axios from 'axios';
-import { ApiClient, ConnectionFailure, isConnectionFailure, SynologyResponse, DownloadStationTaskCreateRequest } from 'synology-typescript-api';
+import {
+  ApiClient,
+  ConnectionFailure,
+  isConnectionFailure,
+  SynologyResponse,
+  DownloadStationTaskCreateRequest,
+  FormFile,
+  isFormFile
+} from 'synology-typescript-api';
 import { errorMessageFromCode, errorMessageFromConnectionFailure } from './apiErrors';
 import { CachedTasks } from './state';
 import { notify } from './browserApi';
@@ -151,17 +159,51 @@ const doCreateTask = wrapInNoPermissionsRetry((api: ApiClient, options: Download
   return api.DownloadStation.Task.Create(options);
 });
 
-export function addDownloadTaskAndPoll(api: ApiClient, url: string, path?: string) {
-  const notificationId = notify('Adding download...', url);
-  const destination = path && path.startsWith('/') ? path.slice(1) : undefined;
+function partitionPromises<T>(promises: Promise<T>[]): Promise<{ resolved: T[]; rejected: Error[]; }> {
+  const accumulator = {
+    resolved: [] as T[],
+    rejected: [] as Error[]
+  };
+
+  const queue = promises.slice();
+
+  function next(): Promise<T | typeof accumulator> {
+    if (queue.length === 0) {
+      return Promise.resolve(accumulator);
+    } else {
+      return queue.shift()!
+        .then(result => {
+          accumulator.resolved.push(result);
+        })
+        .catch(e => {
+          accumulator.rejected.push(e && e instanceof Error
+            ? e
+            : new Error);
+        })
+        .then(() => {
+          return next();
+        })
+    }
+  }
+
+  return next();
+}
+
+export function addDownloadTasksAndPoll(api: ApiClient, urls: string[], path?: string) {
+  let notificationId: string | undefined;
 
   function notifyTaskAddResult(filename?: string) {
     return (result: ConnectionFailure | SynologyResponse<{}>) => {
       console.log('task add result', result);
+
       if (isConnectionFailure(result)) {
         notify('Failed to connection to DiskStation', 'Please check your settings.', notificationId);
       } else if (result.success) {
-        notify('Download added', filename || url, notificationId);
+        if (urls.length === 1) {
+          notify('Download added', filename || urls[0], notificationId);
+        } else {
+          notify(`${urls.length} downloads added`, undefined, notificationId);
+        }
       } else {
         notify('Failed to add download', errorMessageFromCode(result.error.code, 'DownloadStation.Task'), notificationId);
       }
@@ -177,10 +219,10 @@ export function addDownloadTaskAndPoll(api: ApiClient, url: string, path?: strin
     return pollTasks(api);
   }
 
-  if (url) {
+  function maybeMapUrlToFile(url: string): Promise<FormFile | string> {
     if (startsWithAnyProtocol(url, AUTO_DOWNLOAD_TORRENT_FILE_PROTOCOLS)) {
       return Axios.head(url, { timeout: 10000 })
-        .then(response => {
+        .then<FormFile | string>(response => {
           const contentType = response.headers['content-type'].toLowerCase();
           const contentLength = response.headers['content-length'];
           const urlWithoutQuery = url.indexOf('?') !== -1 ? url.slice(0, url.indexOf('?')) : url;
@@ -192,35 +234,72 @@ export function addDownloadTaskAndPoll(api: ApiClient, url: string, path?: strin
               .then(response => {
                 const content = new Blob([ response.data ], { type: metadataFileType.mediaType });
                 const filename = guessFileName(urlWithoutQuery, response.headers, metadataFileType);
-                return doCreateTask(api, {
-                  file: { content, filename },
-                  destination
-                })
-                  .then(notifyTaskAddResult(filename))
-                  .then(pollOnResponse);
+                return { content, filename };
               });
           } else {
-            return doCreateTask(api, {
-              uri: [ url ],
-              destination
-            })
-              .then(notifyTaskAddResult())
-              .then(pollOnResponse);
+            return url;
           }
-        })
-        .catch(notifyUnexpectedError);
-    } else if (startsWithAnyProtocol(url, DOWNLOADABLE_PROTOCOLS)) {
-      return doCreateTask(api, {
-        uri: [ url ],
-        destination
-      })
-        .then(notifyTaskAddResult())
-        .then(pollOnResponse)
-        .catch(notifyUnexpectedError);
+        });
     } else {
-      notify('Failed to add download', `URL must start with one of ${DOWNLOADABLE_PROTOCOLS.join(', ')}`, notificationId);
-      return Promise.resolve();
+      return Promise.resolve(url);
     }
+  }
+
+  function rejectUnknownUrls(taskPromise: Promise<FormFile | string>): Promise<FormFile | string> {
+    return taskPromise
+      .then(task => {
+        if (isFormFile(task)) {
+          return task;
+        } else {
+          if (startsWithAnyProtocol(task, DOWNLOADABLE_PROTOCOLS)) {
+            return task;
+          } else {
+            return Promise.reject(`URL '${task}' must start with one of ${DOWNLOADABLE_PROTOCOLS.join(', ')}`);
+          }
+        }
+      });
+  }
+
+  if (urls && urls.length > 0) {
+    notificationId = urls.length === 1
+      ? notify('Adding download...', urls[0])
+      : notify(`Adding ${urls.length} downloads...`);
+
+    const destination = path && path.startsWith('/') ? path.slice(1) : undefined;
+
+    return partitionPromises(urls
+      .map(maybeMapUrlToFile)
+      .map(rejectUnknownUrls)
+    )
+      .then(({ resolved, rejected }) => {
+        if (resolved.length === 0) {
+
+          return Promise.resolve();
+        } else {
+          const { file, uri } = resolved.reduce((accumulator, task) => {
+            if (isFormFile(task)) {
+              accumulator.file.push(task);
+            } else {
+              accumulator.uri.push(task);
+            }
+            return accumulator;
+          }, { file: [] as FormFile[], uri: [] as string[] });
+
+          // TODO: Test the following:
+          // - mixing file and uri
+          // - providing one non-empty and one empty
+          // - invalid files/uris mixed with valid ones
+          // (it seems likely that this response will have to be mixed with previous rejections for aggregation)
+          return doCreateTask(api, {
+            file,
+            uri,
+            destination
+          })
+            // TODO: Notify on completion: how many succeeded and how many didn't?
+            .then(pollOnResponse)
+        }
+      })
+      .catch(notifyUnexpectedError);
   } else {
     notify('Failed to add download', 'No URL to download given', notificationId);
     return Promise.resolve();

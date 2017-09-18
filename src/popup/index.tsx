@@ -10,10 +10,10 @@ import { SynologyResponse, DownloadStationTask, ApiClient } from 'synology-types
 const moment: typeof momentProxy = (momentProxy as any).default || momentProxy;
 const classNames: typeof classNamesProxy = (classNamesProxy as any).default || classNamesProxy;
 
-import { AdvancedAddDownloadForm } from '../common/AdvancedAddDownloadForm';
+import { AdvancedAddTasksForm } from '../common/AdvancedAddTasksForm';
 import { VisibleTaskSettings, onStoredStateChange, getHostUrl } from '../state';
 import { getSharedObjects } from '../browserApi';
-import { addDownloadTaskAndPoll, pollTasks } from '../apiActions';
+import { addDownloadTasksAndPoll, pollTasks } from '../apiActions';
 import { CallbackResponse } from './popupTypes';
 import { matchesFilter } from './filtering';
 import { Task } from './Task';
@@ -44,7 +44,7 @@ interface PopupProps {
   tasksLastCompletedFetchTimestamp: number | null;
   taskFilter: VisibleTaskSettings;
   openDownloadStationUi?: () => void;
-  createTask?: (url: string, path?: string) => Promise<void>;
+  createTasks?: (urls: string[], path?: string) => Promise<void>;
   pauseTask?: (taskId: string) => Promise<CallbackResponse>;
   resumeTask?: (taskId: string) => Promise<CallbackResponse>;
   deleteTask?: (taskId: string) => Promise<CallbackResponse>;
@@ -52,7 +52,7 @@ interface PopupProps {
 
 interface State {
   shouldShowDropShadow: boolean;
-  isAddingDownload: boolean;
+  isAddingTasks: boolean;
 }
 
 class Popup extends React.PureComponent<PopupProps, State> {
@@ -60,14 +60,14 @@ class Popup extends React.PureComponent<PopupProps, State> {
 
   state: State = {
     shouldShowDropShadow: false,
-    isAddingDownload: false
+    isAddingTasks: false
   };
 
   render() {
     return (
       <div className='popup'>
         {this.renderHeader()}
-        <div className={classNames('popup-body', { 'with-foreground': this.state.isAddingDownload })}>
+        <div className={classNames('popup-body', { 'with-foreground': this.state.isAddingTasks })}>
           {this.renderBody()}
           {this.maybeRenderAddDownloadOverlay()}
         </div>
@@ -117,9 +117,9 @@ class Popup extends React.PureComponent<PopupProps, State> {
           {text}
         </div>
         <button
-          onClick={() => { this.setState({ isAddingDownload: !this.state.isAddingDownload }); }}
+          onClick={() => { this.setState({ isAddingTasks: !this.state.isAddingTasks }); }}
           title='Add download...'
-          {...disabledPropAndClassName(this.props.createTask == null)}
+          {...disabledPropAndClassName(this.props.createTasks == null)}
         >
           <div className='fa fa-lg fa-plus'/>
         </button>
@@ -187,17 +187,17 @@ class Popup extends React.PureComponent<PopupProps, State> {
   }
 
   private maybeRenderAddDownloadOverlay() {
-    if (this.state.isAddingDownload) {
+    if (this.state.isAddingTasks) {
       return (
         <div className='add-download-overlay'>
           <div className='backdrop'/>
           <div className='overlay-content'>
-            <AdvancedAddDownloadForm
+            <AdvancedAddTasksForm
               client={this.props.api}
-              onCancel={() => { this.setState({ isAddingDownload: false }); }}
-              onAddDownload={(url, path) => {
-                this.props.createTask!(url, path);
-                this.setState({ isAddingDownload: false });
+              onCancel={() => { this.setState({ isAddingTasks: false }); }}
+              onAddTasks={(urls, path) => {
+                this.props.createTasks!(urls, path);
+                this.setState({ isAddingTasks: false });
               }}
             />
           </div>
@@ -258,9 +258,9 @@ getSharedObjects()
           }
         : undefined;
 
-      const createTask = hostUrl
-        ? (url: string, path?: string) => {
-            return addDownloadTaskAndPoll(api, url, path);
+      const createTasks = hostUrl
+        ? (urls: string[], path?: string) => {
+            return addDownloadTasksAndPoll(api, urls, path);
           }
         : undefined;
 
@@ -300,7 +300,7 @@ getSharedObjects()
           tasksLastCompletedFetchTimestamp={storedState.tasksLastCompletedFetchTimestamp}
           taskFilter={storedState.visibleTasks}
           openDownloadStationUi={openDownloadStationUi}
-          createTask={createTask}
+          createTasks={createTasks}
           pauseTask={pauseTask}
           resumeTask={resumeTask}
           deleteTask={deleteTask}

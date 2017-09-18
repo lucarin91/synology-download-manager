@@ -1,5 +1,5 @@
 @import 'colors';
-@import 'advanced-add-download-form';
+@import 'advanced-add-tasks-form';
 
 // Weird stuff happens when the contents of the popup change the size of the actual popup's container.
 // In particular, stuff gets extra weird over some internal arbitrary height limit that Chrome has, an
@@ -248,7 +248,7 @@ html, body, #body, .popup {
     padding: 10px;
   }
 
-  .advanced-add-download-form {
+  .advanced-add-tasks-form {
     height: 100%;
 
     .download-path {

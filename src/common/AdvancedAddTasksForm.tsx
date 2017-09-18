@@ -10,7 +10,7 @@ import { PathSelector } from './PathSelector';
 
 export interface Props {
   client: ApiClient;
-  onAddDownload: (url: string, path: string | undefined) => void;
+  onAddTasks: (urls: string[], path: string | undefined) => void;
   onCancel: () => void;
 }
 
@@ -19,7 +19,7 @@ export interface State {
   downloadUrl: string;
 }
 
-export class AdvancedAddDownloadForm extends React.PureComponent<Props, State> {
+export class AdvancedAddTasksForm extends React.PureComponent<Props, State> {
   state: State = {
     selectedPath: undefined,
     downloadUrl: ''
@@ -29,7 +29,7 @@ export class AdvancedAddDownloadForm extends React.PureComponent<Props, State> {
     const hasDownloadUrl = this.state.downloadUrl.length > 0;
 
     return (
-      <div className='advanced-add-download-form'>
+      <div className='advanced-add-tasks-form'>
         <input
           type='text'
           placeholder='URL to download...'
@@ -71,7 +71,7 @@ export class AdvancedAddDownloadForm extends React.PureComponent<Props, State> {
   }
 
   private addDownload = () => {
-    this.props.onAddDownload(this.state.downloadUrl, this.state.selectedPath);
+    this.props.onAddTasks(this.state.downloadUrl, this.state.selectedPath);
   };
 
   private setSelectedPath = (selectedPath: string) => {
