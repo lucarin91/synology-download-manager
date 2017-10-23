@@ -14,6 +14,8 @@ import { notify } from '../browserApi';
 import { wrapInNoPermissionsRetry } from './shared';
 import { pollTasks } from './pollTasks';
 
+// TODO: Grab names from magnet links: 6418b8f.
+
 const AUTO_DOWNLOAD_TORRENT_FILE_PROTOCOLS = [
   'http',
   'https'
