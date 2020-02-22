@@ -1,8 +1,7 @@
 import * as React from "react";
 import classNames from "classnames";
 import debounce from "lodash-es/debounce";
-import { DownloadStationTask, ApiClient } from "synology-typescript-api";
-
+import { DownloadStationTask, ApiClient, isConnectionFailure } from "synology-typescript-api";
 import { moment } from "../common/moment";
 import { VisibleTaskSettings, TaskSortType, BadgeDisplayType } from "../common/state";
 import { sortTasks, filterTasks } from "../common/filtering";
@@ -43,6 +42,7 @@ interface State {
   isAddingDownload: boolean;
   isShowingDisplaySettings: boolean;
   isClearingCompletedTasks: boolean;
+  isScheduleActive: boolean;
   // Bleh. If a popup grows larger in Firefox, it will leave it as such until the DOM changes and causes
   // a relayout. Therefore, after collapsing the filter panel, we want to force a layout to make it the right
   // size again. Unfortunately we can't do that by just reading a layout property like offsetHeight, we have
@@ -58,6 +58,7 @@ export class Popup extends React.PureComponent<Props, State> {
     isAddingDownload: false,
     isShowingDisplaySettings: false,
     isClearingCompletedTasks: false,
+    isScheduleActive: false,
     firefoxRerenderNonce: 0,
   };
 
@@ -83,6 +84,14 @@ export class Popup extends React.PureComponent<Props, State> {
     let classes: string | undefined = undefined;
     let leftIcon: string;
     let rightIcon: string | undefined = undefined;
+
+    this.props.api.DownloadStation.Schedule.GetConfig({}).then((response) => {
+      if (isConnectionFailure(response) || !response.success) {
+        throw new Error('Failed to get schedule config!');
+      } else {
+        this.state.isScheduleActive = response.data.enabled;
+      }
+    })
 
     if (this.props.taskFetchFailureReason === "missing-config") {
       text = browser.i18n.getMessage("Settings_unconfigured");
@@ -150,6 +159,17 @@ export class Popup extends React.PureComponent<Props, State> {
         </button>
         <button
           onClick={() => {
+            this.setState({ isScheduleActive: !this.state.isScheduleActive }, () => {
+              this.props.api.DownloadStation.Schedule.SetConfig({ enabled: this.state.isScheduleActive })
+            });
+          }}
+          title={browser.i18n.getMessage("Toogle the schedule")}
+          className={classNames({ active: this.state.isScheduleActive })}
+        >
+          <div className="fa fa-lg fa-calendar" />
+        </button>
+        <button
+          onClick={() => {
             browser.runtime.openOptionsPage();
           }}
           title={browser.i18n.getMessage("Open_settings")}
@@ -167,10 +187,10 @@ export class Popup extends React.PureComponent<Props, State> {
     const completedTaskIds = this.props.tasks.filter(t => t.status === "finished").map(t => t.id);
     const deleteTasks = this.props.deleteTasks
       ? async () => {
-          this.setState({ isClearingCompletedTasks: true });
-          await this.props.deleteTasks!(completedTaskIds);
-          this.setState({ isClearingCompletedTasks: false });
-        }
+        this.setState({ isClearingCompletedTasks: true });
+        await this.props.deleteTasks!(completedTaskIds);
+        this.setState({ isClearingCompletedTasks: false });
+      }
       : undefined;
     return (
       <div
@@ -194,8 +214,8 @@ export class Popup extends React.PureComponent<Props, State> {
           )}
           {...disabledPropAndClassName(
             this.state.isClearingCompletedTasks ||
-              deleteTasks == null ||
-              completedTaskIds.length === 0,
+            deleteTasks == null ||
+            completedTaskIds.length === 0,
             "clear-completed-tasks-button",
           )}
         >
